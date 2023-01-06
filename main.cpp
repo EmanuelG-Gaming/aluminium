@@ -1,5 +1,6 @@
 #include <map>
 #include <vector>
+#include <list>
 #include <cmath>
 
 #include <SDL2/SDL.h>
@@ -160,52 +161,38 @@ struct Vec2f {
         return *this;
     }
 };
+namespace BoundingBox {
+    SDL_Rect &find_bounding_box(SDL_Rect &dest, float angle) {
+        Vec2f center = { float(dest.x) + (float(dest.w) / 2), float(dest.y) + (float(dest.h) / 2) };
+        
+        Vec2f v1 = { dest.x - center.x, dest.y - center.y };
+        Vec2f v2 = { dest.x + dest.w - center.x, dest.y - center.y };
+        Vec2f v3 = { dest.x - center.x, dest.y + dest.h - center.y };
+        Vec2f v4 = { dest.x + dest.w - center.x, dest.y + dest.h - center.y };
+        
+        // Rotate
+        float a = Utils::radians(angle);
+        Vec2f r1 = v1.rotate(a);
+        Vec2f r2 = v2.rotate(a);
+        Vec2f r3 = v3.rotate(a);
+        Vec2f r4 = v4.rotate(a);
+        
+        Vec2f min = { std::min({r1.x, r2.x, r3.x, r4.x}), std::min({r1.y, r2.y, r3.y, r4.y}) };
+        Vec2f max = { std::max({r1.x, r2.x, r3.x, r4.x}), std::max({r1.y, r2.y, r3.y, r4.y}) };
+        
+        SDL_Rect result;
+        result.x = min.x + center.x;
+        result.y = min.y + center.y;
+        result.w = max.x - min.x;
+        result.h = max.y - min.y;
+        
+        return result;
+    };
+};
 
 enum LoadStages{
-    TEXTURES
-};
-
-class Assets {
-    std::map<const char*, SDL_Texture*> textures;
-    public:
-        static Assets &get()
-        {
-            static Assets ins;
-            return ins;
-        }
-        
-        SDL_Texture *find_texture(const char *location) {
-            return textures[location];
-        }
-        void add_texture(const char *location, const char *name) {
-            SDL_Texture *t = load_texture(name);
-            textures[location] = t;
-        }
-        void load(LoadStages stage);
-    private:
-        Assets() {}
-        ~Assets() {}
-    public:
-        Assets(Assets const&) = delete;
-        void operator = (Assets const&) = delete;    
-};
-void Assets::load(LoadStages stage) {
-    switch (stage) {
-         case TEXTURES:
-              add_texture("aluminium-ball", "aluminium-ball.png");
-              add_texture("wooden-ball", "wooden-ball.png");
-              add_texture("wooden-plank", "wooden-plank.png");
-              add_texture("wooden-beam", "wooden-beam.png");
-              break;
-    }
-};
-
-namespace Vars {
-    Vec2f gravity = { 0.0f, 9.8f };
-    // Measured in radians
-    float gravity_angle() {
-        return atan2(-gravity.y, gravity.x);
-    }
+    TEXTURES,
+    LEVELS
 };
 
 struct CollisionData {
@@ -213,67 +200,6 @@ struct CollisionData {
     Vec2f intersection_point;
     bool collided;
 };
-
-struct Circle {
-    Vec2f position;
-    float radius;
-};
-
-
-namespace Draw {
-    // Insert drawing methods here...
-    void color(float r, float g, float b) {
-        float ar = r * 255;
-        float ag = g * 255; 
-        float ab = b * 255;
-        
-        Utils::clamp(ar, 0, 255);
-        Utils::clamp(ag, 0, 255);
-        Utils::clamp(ab, 0, 255); 
-        SDL_SetRenderDrawColor(renderer, (int) ar, (int) ag, (int) ab, 255);
-    };
-    void texture(SDL_Texture *tex, int x, int y, int w, int h)
-    { 
-        int sw = (int) w;
-        int sh = (int) h;
-        SDL_Rect cRect = {(int) x - sw / 2, (int) y - sh / 2, sw, sh};
-        SDL_Rect v = Utils::get_viewport_rect();
-        if (Utils::rectangle_collide(&cRect, &v))
-            SDL_RenderCopy(renderer, tex, NULL, &cRect);
-    }
-    void texture_uncentered(SDL_Texture *tex, int x, int y, int width, int height)
-    { 
-        int sw = (int) width;
-        int sh = (int) height;
-        SDL_Rect cRect = {x, y, sw, sh};
-        SDL_Rect v = Utils::get_viewport_rect();
-        if (Utils::rectangle_collide(&cRect, &v))
-            SDL_RenderCopy(renderer, tex, NULL, &cRect);
-    }
-    void rotated_texture(SDL_Texture *tex, int x, int y, int width, int height, float angle)
-    {
-        int sw = (int) width;
-        int sh = (int) height;
-        SDL_Rect cRect = {x, y, sw, sh};
-        SDL_RenderCopyEx(renderer, tex, NULL, &cRect, angle, NULL, SDL_FLIP_NONE);
-    }
-    void rect_fill_uncentered(int x, int y, int w, int h)
-    {
-        SDL_Rect dest = { x, y, w, h };
-        SDL_RenderFillRect(renderer, &dest);
-    } 
-    void rect_fill(int x, int y, int w, int h)
-    {
-        SDL_Rect dest = { x - w / 2, y - h / 2, w, h };
-        if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) 
-            SDL_RenderFillRect(renderer, &dest);
-    }
-    void line(int x1, int y1, int x2, int y2)
-    {
-        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
-    }
-};
-
 class WorldObject {
     public:
         float resistance;
@@ -312,6 +238,225 @@ class WorldObject {
         virtual void render() {}
 };
 
+class Level {
+      public:
+          Vec2f playerStartPos;
+          int index = 0;
+          const char *name;
+          Level(const char *name);
+          void add(WorldObject *obj, float x, float y);
+          void set_start_position(float x, float y) {
+              playerStartPos.x = x;
+              playerStartPos.y = y;
+          }
+          
+          void set_objects(std::vector<WorldObject*> &other) {
+              objects = other;
+          }
+          std::vector<WorldObject*> &get_objects() {
+              return objects;
+          }
+          std::vector<WorldObject*> &get_loaded() {
+              return loaded;
+          }
+      protected:
+          std::vector<WorldObject*> objects;
+          std::vector<WorldObject*> loaded;
+};
+void Level::add(WorldObject *obj, float x, float y) {
+      obj->place(x, y);
+      obj->index = loaded.size();
+      
+      loaded.push_back(obj);
+};
+
+class Assets {
+    std::map<const char*, SDL_Texture*> textures;
+    Level *currentLevel = nullptr;
+    public:
+        std::map<const char*, Level*> levels;
+        
+        static Assets &get()
+        {
+            static Assets ins;
+            return ins;
+        }
+        
+        SDL_Texture *find_texture(const char *location) {
+            return textures[location];
+        }
+        void add_texture(const char *location, const char *name) {
+            SDL_Texture *t = load_texture(name);
+            textures[location] = t;
+        }
+        Level *find_level(const char *location) {
+            return levels[location];
+        }
+        void add_level(Level *l, const char *location) {
+            levels[location] = l;
+        }
+        
+        void load(LoadStages stage);
+    private:
+        Assets() {}
+        ~Assets() {}
+    public:
+        Assets(Assets const&) = delete;
+        void operator = (Assets const&) = delete;    
+};
+
+Level::Level(const char *name) {
+    this->objects.empty(); 
+    this->playerStartPos.set_zero();
+    this->name = name;
+    this->index = Assets::get().levels.size();
+};
+
+struct Circle {
+    Vec2f position;
+    float radius;
+};
+
+
+namespace Draw {
+    // Insert drawing methods here...
+    void color(float r, float g, float b) {
+        float ar = r * 255;
+        float ag = g * 255; 
+        float ab = b * 255;
+        
+        Utils::clamp(ar, 0, 255);
+        Utils::clamp(ag, 0, 255);
+        Utils::clamp(ab, 0, 255); 
+        SDL_SetRenderDrawColor(renderer, (int) ar, (int) ag, (int) ab, 255);
+    };
+    void rect_fill_uncentered(int x, int y, int w, int h)
+    {
+        SDL_Rect dest = { x, y, w, h };
+        SDL_RenderFillRect(renderer, &dest);
+    } 
+    void rect_fill(int x, int y, int w, int h)
+    {
+        SDL_Rect dest = { x - w / 2, y - h / 2, w, h };
+        if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) 
+            SDL_RenderFillRect(renderer, &dest);
+    }
+    void rect_uncentered(int x, int y, int w, int h)
+    {
+        SDL_Rect dest = { x, y, w, h };
+        SDL_RenderDrawRect(renderer, &dest);
+    } 
+    void rect(int x, int y, int w, int h)
+    {
+        SDL_Rect dest = { x - w / 2, y - h / 2, w, h };
+        if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) 
+            SDL_RenderDrawRect(renderer, &dest);
+    }
+    void texture(SDL_Texture *tex, int x, int y, int w, int h)
+    { 
+        int sw = (int) w;
+        int sh = (int) h;
+        SDL_Rect cRect = {(int) x - sw / 2, (int) y - sh / 2, sw, sh};
+        SDL_Rect v = Utils::get_viewport_rect();
+        if (Utils::rectangle_collide(&cRect, &v))
+            SDL_RenderCopy(renderer, tex, NULL, &cRect);
+    }
+    void texture_uncentered(SDL_Texture *tex, int x, int y, int width, int height)
+    { 
+        int sw = (int) width;
+        int sh = (int) height;
+        SDL_Rect cRect = {x, y, sw, sh};
+        SDL_Rect v = Utils::get_viewport_rect();
+        if (Utils::rectangle_collide(&cRect, &v))
+            SDL_RenderCopy(renderer, tex, NULL, &cRect);
+    }
+    void rotated_texture(SDL_Texture *tex, int x, int y, int width, int height, float angle)
+    {
+        int sw = (int) width;
+        int sh = (int) height;
+        SDL_Rect cRect = {x, y, sw, sh};
+        SDL_Rect b = BoundingBox::find_bounding_box(cRect, angle);
+        SDL_Rect v = Utils::get_viewport_rect();
+        if (Utils::rectangle_collide(&b, &v)) {
+            SDL_RenderCopyEx(renderer, tex, NULL, &cRect, angle, NULL, SDL_FLIP_NONE);
+        }
+        // Debug drawing
+        rect_uncentered(b.x, b.y, b.w, b.h);
+    }
+    
+    void line(int x1, int y1, int x2, int y2)
+    {
+        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    }
+};
+
+class Action {
+    public:
+       bool started;
+       bool completed;
+       Action() {
+           this->started = false;
+           this->completed = false;
+       }
+       // Called when the action is first started
+       virtual void run() {}
+       // Called when the action is happening
+       virtual void update(float timeTook) {}
+       virtual void handle_event(SDL_Event ev) {}
+       // Called when the action is finished
+       virtual void finish() {} 
+};
+
+class ActionProcessor {
+    std::list<Action*> actions;
+    public:
+       static ActionProcessor &get()
+       {
+           static ActionProcessor ins;
+           return ins;
+       }
+       void add(Action *act);
+       Action *front();
+       void subtract();
+       void update(float timeTook);
+       bool started();
+    private:
+        ActionProcessor() {}
+        ~ActionProcessor() {}
+    public:
+        ActionProcessor(ActionProcessor const&) = delete;
+        void operator = (ActionProcessor const&) = delete;    
+};
+void ActionProcessor::add(Action *act) {
+    actions.push_back(act);
+};
+Action *ActionProcessor::front() {
+    if (started())
+        return actions.front();
+    else return new Action();
+};
+void ActionProcessor::subtract() {
+    if (started()) {
+        delete front();
+        actions.pop_front();
+    }
+};
+void ActionProcessor::update(float timeTook) {
+    Action *a = front();
+    if (started()) {
+        if (!a->completed) {
+           if (!a->started) { a->run(); a->started = true; }
+           else a->update(timeTook);
+        } else {
+           a->finish();
+           subtract();
+        }
+    }
+};
+bool ActionProcessor::started() {
+    return actions.size() > 0;
+};
+
 class Ball : public WorldObject {
     SDL_Texture *ballTexture;
     public: 
@@ -330,6 +475,63 @@ class Ball : public WorldObject {
     
     CollisionData collision(WorldObject *object) override;
 };
+namespace Vars {
+    Ball *player;
+    Level *currentLevel = nullptr;
+    Vec2f gravity = { 0.0f, 9.8f };
+    // Measured in radians
+    float gravity_angle() {
+        return atan2(-gravity.y, gravity.x);
+    }
+    void load_level(const char *levelName, float playerX, float playerY) {
+        Level *toLevel = Assets::get().find_level(levelName);
+        if (toLevel != nullptr) {
+            currentLevel = toLevel;
+            currentLevel->get_objects().clear();
+            currentLevel->set_objects(toLevel->get_loaded());
+            
+            // Reset kinematics
+            player->reset();
+            player->place(playerX, playerY);
+            player->index = Vars::currentLevel->get_objects().size();
+            
+            currentLevel->get_objects().push_back(player);
+        } 
+    }
+    void load_level(const char *levelName) {
+        Level *toLevel = Assets::get().find_level(levelName);
+        if (toLevel != nullptr) {
+            load_level(levelName, toLevel->playerStartPos.x, toLevel->playerStartPos.y);
+        }
+    }
+};
+class LevelCompleteAction : public Action {
+    const char *toLevelName;
+    float timeCompleted;
+    public:
+       LevelCompleteAction(const char *toLevelName) : Action() {
+           this->toLevelName = toLevelName;
+       }
+       void start() {
+           this->timeCompleted = 0.0f;
+       }
+       void update(float timeTook) override; 
+       void finish() override; 
+};
+void LevelCompleteAction::update(float timeTook) {
+    timeCompleted += timeTook;
+    
+    if (timeCompleted >= 2) {
+        completed = true;
+    }
+};
+
+void LevelCompleteAction::finish() {
+    // Load level
+    Vars::load_level(toLevelName);
+    printf("loaded ");
+};
+
 class Line : public WorldObject {
     public:
         Vec2f endPosition;
@@ -346,7 +548,6 @@ class Line : public WorldObject {
 };
 
 class Rectangle : public WorldObject {
-    SDL_Texture *rectangleTexture;
     public:
         float width;
         float height;
@@ -359,15 +560,64 @@ class Rectangle : public WorldObject {
             
             this->name = "rectangle";
         }
-        void render() override;
+        virtual void render() override;
+    protected:
+        SDL_Texture *rectangleTexture;
 };
 void Rectangle::render() {
+     float ox = position.x, oy = position.y;
+     Projection::world_to_screen(ox, oy);
+     Draw::rotated_texture(rectangleTexture, ox, oy, width, height, Utils::degrees(angle));
+};
+
+class Trigger : public Rectangle {
+    public:
+        std::function<void(WorldObject *other)> trigger;
+        // Does nothing on touch
+        Trigger(float width, float height, float angle) : Rectangle("wooden-beam", width, height, angle) {
+            this->triggered = false;
+            
+            this->name = "trigger";
+        }
+        Trigger(float width, float height, float angle, std::function<void(WorldObject *other)> trigger) : Rectangle("wooden-beam", width, height, angle) {
+            this->triggered = false;
+            this->name = "trigger";
+            
+            this->trigger = trigger;
+        }
+        void collide(WorldObject *o);
+        void render() override {}
+    protected:
+        bool triggered;
+};
+void Trigger::collide(WorldObject *o) {
+    if (!triggered) {
+        trigger(o);
+        triggered = true;
+    }
+};
+
+class Flag : public Trigger {
+    const char *toLevelName;
+    public:
+        Flag(const char *toLevelName, float angle) : Trigger(30, 60, angle) {
+             this->rectangleTexture = Assets::get().find_texture("flag");
+             this->toLevelName = toLevelName;
+             
+             trigger = [&](WorldObject *o) { 
+                 ActionProcessor::get().add(new LevelCompleteAction(this->toLevelName));
+             };
+        }
+        
+        void render() override;
+};
+void Flag::render() {
      float ox = position.x, oy = position.y;
      Projection::world_to_screen(ox, oy);
      
      Draw::rotated_texture(rectangleTexture, ox, oy, width, height, Utils::degrees(angle));
 };
-
+ 
 void Ball::jump(float force, WorldObject *o) {
      const char *oName = o->name;
      
@@ -420,9 +670,6 @@ void Ball::update(float timeTook) {
     position.x += vel.x * timeTook;
     position.y += vel.y * timeTook;
     
-    if (position.y >= radius + 50000) {
-        place(position.x, -400);
-    }
     if (fabs(vel.len2()) < 0.01f) {
         vel.set_zero();
     }
@@ -457,8 +704,8 @@ CollisionData Ball::collision(WorldObject *object) {
           data.intersection_point = interp_point;
           data.collided = collided;
      }
-     // Colliding with a rectangle
-     if (oName == "rectangle") {
+     // Colliding with a rectangle/trigger
+     if ((oName == "rectangle") || (oName == "trigger")) {
           Rectangle *dest = (Rectangle*) object;
           Vec2f centerRectangle = dest->position;
           centerRectangle.add(dest->width / 2, dest->height / 2);
@@ -557,14 +804,6 @@ class Pendulum : public WorldObject {
            knob->index = vec.size();
            vec.push_back(knob);
        }
-       void place(Vec2f pos) {
-           float x = pos.x + cos(angle) * length;
-           float y = pos.y + sin(angle) * length;
-           
-           this->knob->place(x, y);
-           this->knobPosition.x = x;
-           this->knobPosition.y = y;
-       }
        void apply(Vec2f vel) {
            Vec2f p = vel;
            Vec2f gradient = { knobPosition.x - position.x, knobPosition.y - position.y };
@@ -622,6 +861,110 @@ void Pendulum::render() {
      //Draw::line(ox, oy, mx, my);
 };
 
+void Assets::load(LoadStages stage) {
+    auto add = [&](WorldObject *obj) -> WorldObject* {
+        if (currentLevel == nullptr) {
+            printf("Could not find a level for the object. Switching to the default rectangle...");
+            return new Rectangle("default-rectangle", 100, 40, 0);
+        }
+        return obj;
+    };
+    
+    auto level = [&](const char *name) -> Level* { 
+        Level *l = new Level(name);
+        currentLevel = l;
+        
+        return l;
+    };
+    auto line = [&](float x2, float y2, int pointing) -> Line* {
+        Line *l = new Line({0, 0}, {x2, y2});
+        l->side = pointing;
+        
+        return (Line*) add(l);
+    };
+    auto ball = [&](const char *spriteName, float radius, float mass) -> Ball* {
+        Ball *b = new Ball(spriteName, radius, mass);
+        return (Ball*) add(b);
+    };
+    auto pendulum = [&](const char *spriteName, float radius, float mass, float length) -> Pendulum* {
+        Ball *bob = ball(spriteName, radius, mass);
+        Pendulum *p = new Pendulum(length, bob);
+        if (currentLevel != nullptr) {
+            p->add(currentLevel->get_objects());
+        }
+        
+        return (Pendulum*) add(p);
+    };
+    auto rectangle = [&](const char *spriteName, float width, float height, float angle) -> Rectangle* {
+        Rectangle *r = new Rectangle(spriteName, width, height, angle);
+        return (Rectangle*) add(r);
+    };
+    auto trigger = [&](float width, float height, float angle, std::function<void(WorldObject*)> cons) -> Trigger* {
+        Trigger *t = new Trigger(width, height, angle, cons);
+        return (Trigger*) add(t);
+    }; 
+    auto flag = [&](const char *levelName, float angle) -> Flag* {
+        Flag *f = new Flag(levelName, angle);
+        return (Flag*) add(f);
+    };     
+    switch (stage) {
+         case TEXTURES:
+              add_texture("aluminium-ball", "aluminium-ball.png");
+              add_texture("wooden-ball", "wooden-ball.png");
+              add_texture("wooden-plank", "wooden-plank.png");
+              add_texture("wooden-beam", "wooden-beam.png");
+              add_texture("flag", "flag.png");
+              add_texture("default-rectangle", "default-rectangle.png");
+              break;
+              
+         case LEVELS:
+              Level *l1 = level("Yes1");
+              l1->set_start_position(200, -50);
+              l1->add(rectangle("wooden-beam", 1000, 100, 0), 0, 0);
+              l1->add(rectangle("wooden-plank", 140, 40, 0), 1100, -100);
+              l1->add(rectangle("wooden-plank", 120, 40, 0), 1200, -200);
+              
+              l1->add(rectangle("wooden-plank", 700, 40, -10), 300, -200);
+              l1->add(rectangle("wooden-plank", 320, 40, 0), 0, -140);
+              //l1->add(rectangle("wooden-plank", 180, 40, 30), 340, -190);
+              
+              l1->add(rectangle("wooden-plank", 80, 20, 0), 150, -380); 
+              l1->add(rectangle("wooden-plank", 80, 20, 0), 0, -260);
+              
+              l1->add(rectangle("wooden-plank", 200, 40, 0), 320, -450);
+              l1->add(rectangle("wooden-plank", 200, 40, 0), 320, -535);
+              
+              l1->add(rectangle("wooden-plank", 40, 140, 0), 320, -675);
+              l1->add(rectangle("wooden-plank", 140, 40, 0), 720, -440);
+              
+              
+              for (int i = 0; i < 3; i++)
+                   l1->add(ball("wooden-ball", 16, 1.2), 160 + i * (80 / 3), -400);
+              for (int i = 0; i < 2; i++)
+                   l1->add(ball("wooden-ball", 16, 1.2), 20 + i * (80 / 2), -300);
+              /*
+              l1->add(trigger(300, 100, 0, [&](WorldObject *o){
+                   Ball *b = new Ball("aluminium-ball", 16, 1.0);
+                   b->place(o->position.x, o->position.y - 40);
+                   b->index = Vars::currentLevel->get_objects().size();
+                   
+                   Vars::currentLevel->get_objects().push_back(b);
+              }), 40, -100);
+              */
+              l1->add(flag("yes2", 0), 780, -500);
+              
+              add_level(l1, "yes");
+              
+              Level *l2 = level("Yes2");
+              l2->set_start_position(300, -100);
+              l2->add(rectangle("wooden-beam", 1000, 40, 0), 0, 0);
+              l2->add(flag("yes", 0), 780, -60);
+              
+              add_level(l2, "yes2");
+              break;
+    }
+};
+
 class Game
 {
    public:
@@ -635,55 +978,50 @@ class Game
       virtual void update(float timeTook) {};
 };
 
+
 class Aluminium : public Game {
-    Ball *player;
-    std::vector<WorldObject*> objects;
     public:
        void init() override {
            displayName = "Aluminium";
        } 
        void load() override {
            Assets::get().load(TEXTURES);
+           Assets::get().load(LEVELS);
            
-           add_ball(600, -300, "aluminium-ball", 16, 1.7, true);
-           
-           add_pendulum(new Ball("aluminium-ball", 16, 10), 1100, -110, 70);
-           add_ball(800, -1000, "wooden-ball", 16, 1.0);
-            
-           add_rectangle("wooden-beam", 0, 0, 10000, 40);
-               
-           add_rectangle("wooden-plank", 500, -150, 150, 150);
-           add_rectangle("wooden-plank", 750, -150, 200, 40, -30);
-           
+           load_level(new Ball("aluminium-ball", 16, 1.7), "yes");
+           load_level("yes");
        }
     
        void handle_event(SDL_Event ev) override {
-           int cx = 0, cy = 0;
-           SDL_GetMouseState(&cx, &cy);
+           if (!ActionProcessor::get().started()) {
+               int cx = 0, cy = 0;
+               SDL_GetMouseState(&cx, &cy);
            
-           float f = cx > SCREEN_WIDTH / 2 ? 4 : -4;
-           player->vel.x += f;
-           
-           if (player->colliding != nullptr) {
-               if (cy < SCREEN_WIDTH / 2) {  
-                   player->jump(300, player->colliding);
-                   player->colliding = nullptr;
+               float f = cx > SCREEN_WIDTH / 2 ? 4 : -4;
+               Vars::player->vel.x += f;
+              
+               if (Vars::player->colliding != nullptr) {
+                   if (cy < SCREEN_WIDTH / 2) { 
+                       Vars::player->jump(300, Vars::player->colliding);
+                       Vars::player->colliding = nullptr;
+                   }
                }
            }
        }
        void update(float timeTook) override { 
-           for (auto &obj : objects) {
+           for (auto &obj : Vars::currentLevel->get_objects()) {
                 obj->update(timeTook);
            }
-           Projection::adjust_camera(player->position.x, player->position.y);
+           Projection::adjust_camera(Vars::player->position.x, Vars::player->position.y);
+           ActionProcessor::get().update(timeTook);
            
            // Collision detection
-           for (auto &obj : objects) {
+           for (auto &obj : Vars::currentLevel->get_objects()) {
                 const char *name = obj->name;
                 if (name == "ball") {
                      Ball *ball = (Ball*) obj;
                      
-                     for (auto &other : objects) {
+                     for (auto &other : Vars::currentLevel->get_objects()) {
                           if (ball->index != other->index) {
                               if (other->name == "line") {
                                   Line *line = (Line*) other;
@@ -707,6 +1045,15 @@ class Aluminium : public Game {
                     
                                       ball->vel.x = ball->vel.x - j * nor.x * line->mass;
                                       ball->vel.y = ball->vel.y - j * nor.y * line->mass;
+                                  }
+                              }
+                              if (other->name == "trigger") {
+                                  Trigger *trig = (Trigger*) other;
+                                  CollisionData dat = ball->collision(trig);
+                                  if (dat.collided) {
+                                      if (ball == Vars::player) {
+                                          trig->collide(ball);
+                                      }
                                   }
                               }
                               if (other->name == "rectangle") {
@@ -742,6 +1089,7 @@ class Aluminium : public Game {
                                       ball->vel.y = ball->vel.y - j * nor.y * r->mass;
                                   }
                               }
+                              
                               if (other->name == "ball") {
                                   Ball *ball2 = (Ball*) other;
                                   CollisionData dat = ball->collision(ball2);
@@ -785,57 +1133,22 @@ class Aluminium : public Game {
                      }
                 }
            }
+           
            // Rendering
            Draw::color(0.1, 0.1, 0.85);
            Draw::rect_fill_uncentered(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
            Draw::color(1.0, 1.0, 1.0);
            
-           for (auto &obj : objects) {
+           for (auto &obj : Vars::currentLevel->get_objects()) {
                 obj->render();
            }
        }
-       void add_line(float x1, float y1, float x2, float y2) {
-           add_line(x1, y1, x2, y2, 0);
+       void load_level(Ball *ball, const char *levelName) {
+           Vars::player = ball;
+           Vars::load_level(levelName);   
        }
-       void add_line(float x1, float y1, float x2, float y2, int pointing) {
-           Line *line = new Line({x1, y1}, {x2, y2});
-           line->side = pointing;
-           
-           line->index = objects.size();
-           objects.push_back(line);
-       }
-       
-       void add_ball(float x, float y, const char *spriteName, float radius, float mass) {
-           add_ball(x, y, spriteName, radius, mass, false);
-       }
-       void add_ball(float x, float y, const char *spriteName, float radius, float mass, bool isPlayer) {
-           Ball *ball = new Ball(spriteName, radius, mass);
-           ball->place(x, y);
-           if (isPlayer) {
-               player = ball;
-           }
-           ball->index = objects.size();
-           objects.push_back(ball);
-       }
-       void add_pendulum(Ball *ball, float x, float y, float length) {
-           Pendulum *p = new Pendulum(length, ball);
-           p->position.x = x;
-           p->position.y = y;
-           p->place({x, y});
-           p->add(objects);
-           
-           p->index = objects.size();
-           objects.push_back(p);
-       }
-       void add_rectangle(const char *spriteName, float centerX, float centerY, float width, float height, float angle) {
-           Rectangle *r = new Rectangle(spriteName, width, height, angle);
-           r->place(centerX, centerY);
-           
-           r->index = objects.size();
-           objects.push_back(r);
-       }
-       void add_rectangle(const char *spriteName, float centerX, float centerY, float width, float height) {
-           add_rectangle(spriteName, centerX, centerY, width, height, 0);
+       void load_level(const char *levelName) { 
+           Vars::load_level(levelName);
        }
 };
 
