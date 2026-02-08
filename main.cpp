@@ -1,3 +1,6 @@
+#include <SDL2/SDL_hints.h>
+#include <SDL2/SDL_render.h>
+#include <SDL2/SDL_timer.h>
 #include <map>
 #include <vector>
 #include <cmath>
@@ -857,15 +860,18 @@ int main()
         return 1;
     }
 
-    renderer = SDL_CreateRenderer(window, -1, 0);
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (renderer == NULL)
     {
         fprintf(stderr, "SDL_CreateRenderer Error: %s\n", SDL_GetError());
         return 1;
     }
+    SDL_RenderSetVSync(renderer, 1);
+
     game.load();
     
     float then = 0.0f, delta = 0.0f;
+    float now = SDL_GetPerformanceCounter();
     bool disabled = false;
     SDL_Event e;
     while (!disabled)
@@ -881,9 +887,9 @@ int main()
             }
             game.handle_event(e);
         }
-        float now = SDL_GetTicks();
-        delta = (now - then) * 1000 / SDL_GetPerformanceFrequency();
         then = now;
+        now = SDL_GetPerformanceCounter();
+        delta = (now - then) * 1 / SDL_GetPerformanceFrequency();
         
         Draw::color(0, 0, 0);
         SDL_RenderClear(renderer);
