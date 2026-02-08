@@ -310,7 +310,7 @@ class WorldObject {
              vel.set_zero();
              acceleration.set_zero();
         } 
-        virtual CollisionData collision(WorldObject *object) {}
+        virtual CollisionData collision(WorldObject *object) { return CollisionData{}; }
         virtual void update(float timeTook) {}
         virtual void render() {}
 };
